@@ -2,6 +2,7 @@
   import { imageLoader } from '$lib/actions/image-loader.svelte';
   import { thumbhash } from '$lib/actions/thumbhash';
   import { zoomImageAction } from '$lib/actions/zoom-image';
+  import Letterboxes from '$lib/components/asset-viewer/letterboxes.svelte';
   import BrokenAsset from '$lib/components/assets/broken-asset.svelte';
   import { assetViewerManager } from '$lib/managers/asset-viewer-manager.svelte';
   import { SlideshowLook, SlideshowState } from '$lib/stores/slideshow.store';
@@ -25,6 +26,7 @@
     };
     slideshowState: SlideshowState;
     slideshowLook: SlideshowLook;
+    transitionName?: string | null | undefined;
     onImageReady?: () => void;
     onError?: () => void;
     imgElement?: HTMLImageElement;
@@ -40,6 +42,7 @@
     container,
     slideshowState,
     slideshowLook,
+    transitionName,
     onImageReady,
     onError,
     overlays,
@@ -110,6 +113,10 @@
     };
   });
 
+  const blurredSlideshow = $derived(
+    slideshowState !== SlideshowState.None && slideshowLook === SlideshowLook.BlurredBackground && !!asset.thumbhash,
+  );
+
   const loadState = $derived(adaptiveImageLoader.adaptiveLoaderState);
   const imageAltText = $derived(loadState.previewUrl ? $getAltText(toTimelineAsset(asset)) : '');
   const thumbnailUrl = $derived(loadState.thumbnailUrl);
@@ -134,59 +141,42 @@
   });
 </script>
 
-<div
-  class="relative h-full w-full"
-  style:left={renderDimensions.left}
-  style:top={renderDimensions.top}
-  style:width={renderDimensions.width}
-  style:height={renderDimensions.height}
->
-  {#if asset.thumbhash}
-    <!-- Thumbhash / spinner layer  -->
-    <div style:transform-origin="0px 0px" style:transform={zoomTransform} class="h-full w-full absolute">
-      <canvas use:thumbhash={{ base64ThumbHash: asset.thumbhash }} class="h-full w-full absolute -z-2"></canvas>
-    </div>
-  {:else if showSpinner}
-    <div id="spinner" class="absolute flex h-full items-center justify-center">
-      <LoadingSpinner />
-    </div>
+<div class="relative h-full w-full">
+  <!-- Blurred slideshow background (full viewport) -->
+  {#if blurredSlideshow}
+    <canvas use:thumbhash={{ base64ThumbHash: asset.thumbhash! }} class="-z-1 absolute top-0 left-0 start-0 h-dvh w-dvw"
+    ></canvas>
   {/if}
 
+  <!-- Letterbox regions (empty space around image) -->
+  <Letterboxes
+    {transitionName}
+    {slideshowState}
+    {slideshowLook}
+    hasThumbhash={!!asset.thumbhash}
+    {scaledDimensions}
+    {container}
+  />
+
+  <!-- Main image box with transition -->
   <div
-    class="absolute top-0"
-    style:transform-origin="0px 0px"
-    style:transform={zoomTransform}
+    style:view-transition-name={transitionName}
+    data-transition-name={transitionName}
+    class="absolute"
+    style:left={renderDimensions.left}
+    style:top={renderDimensions.top}
     style:width={renderDimensions.width}
     style:height={renderDimensions.height}
-    use:imageLoader={{
-      src: thumbnailUrl,
-      onStart: () => adaptiveImageLoader.onThumbnailStart(),
-      onLoad: () => adaptiveImageLoader.onThumbnailLoad(),
-      onError: () => adaptiveImageLoader.onThumbnailError(),
-      onElementCreated: (element) => (thumbnailElement = element),
-      imgClass: ['absolute h-full', 'w-full'],
-      alt: '',
-      role: 'presentation',
-      dataAttributes: {
-        'data-testid': 'thumbnail',
-      },
-    }}
-  ></div>
-
-  {#if showBrokenAsset}
-    <div class="h-full w-full absolute" style:transform-origin="0px 0px" style:transform={zoomTransform}>
-      <BrokenAsset class="text-xl h-full w-full" />
-    </div>
-  {:else}
-    <!-- Slideshow blurred background -->
-    {#if thumbnailUrl && slideshowState !== SlideshowState.None && slideshowLook === SlideshowLook.BlurredBackground}
-      <img
-        src={thumbnailUrl}
-        alt=""
-        role="presentation"
-        class="-z-1 absolute top-0 start-0 object-cover h-full w-full blur-lg"
-        draggable="false"
-      />
+  >
+    {#if asset.thumbhash}
+      <!-- Thumbhash / spinner layer  -->
+      <div style:transform-origin="0px 0px" style:transform={zoomTransform} class="h-full w-full absolute">
+        <canvas use:thumbhash={{ base64ThumbHash: asset.thumbhash }} class="h-full w-full absolute -z-2"></canvas>
+      </div>
+    {:else if showSpinner}
+      <div id="spinner" class="absolute flex h-full items-center justify-center">
+        <LoadingSpinner />
+      </div>
     {/if}
 
     <div
@@ -196,54 +186,81 @@
       style:width={renderDimensions.width}
       style:height={renderDimensions.height}
       use:imageLoader={{
-        src: previewUrl,
-        onStart: () => adaptiveImageLoader.onPreviewStart(),
-        onLoad: () => adaptiveImageLoader.onPreviewLoad(),
-        onError: () => adaptiveImageLoader.onPreviewError(),
-        onElementCreated: (element) => (previewElement = element),
-        imgClass: ['h-full', 'w-full', imageClass],
-        alt: imageAltText,
-        draggable: false,
+        src: thumbnailUrl,
+        onStart: () => adaptiveImageLoader.onThumbnailStart(),
+        onLoad: () => adaptiveImageLoader.onThumbnailLoad(),
+        onError: () => adaptiveImageLoader.onThumbnailError(),
+        onElementCreated: (element) => (thumbnailElement = element),
+        imgClass: ['absolute h-full', 'w-full'],
+        alt: '',
+        role: 'presentation',
         dataAttributes: {
-          'data-testid': 'preview',
+          'data-testid': 'thumbnail',
         },
       }}
-    >
-      {@render overlays?.()}
-    </div>
+    ></div>
 
+    {#if showBrokenAsset}
+      <div class="h-full w-full absolute" style:transform-origin="0px 0px" style:transform={zoomTransform}>
+        <BrokenAsset class="text-xl h-full w-full" />
+      </div>
+    {:else}
+      <div
+        class="absolute top-0"
+        style:transform-origin="0px 0px"
+        style:transform={zoomTransform}
+        style:width={renderDimensions.width}
+        style:height={renderDimensions.height}
+        use:imageLoader={{
+          src: previewUrl,
+          onStart: () => adaptiveImageLoader.onPreviewStart(),
+          onLoad: () => adaptiveImageLoader.onPreviewLoad(),
+          onError: () => adaptiveImageLoader.onPreviewError(),
+          onElementCreated: (element) => (previewElement = element),
+          imgClass: ['h-full', 'w-full', imageClass],
+          alt: imageAltText,
+          draggable: false,
+          dataAttributes: {
+            'data-testid': 'preview',
+          },
+        }}
+      >
+        {@render overlays?.()}
+      </div>
+
+      <div
+        class="absolute top-0"
+        style:transform-origin="0px 0px"
+        style:transform={zoomTransform}
+        style:width={renderDimensions.width}
+        style:height={renderDimensions.height}
+        use:imageLoader={{
+          src: originalUrl,
+          onStart: () => adaptiveImageLoader.onOriginalStart(),
+          onLoad: () => adaptiveImageLoader.onOriginalLoad(),
+          onError: () => adaptiveImageLoader.onOriginalError(),
+          onElementCreated: (element) => (originalElement = element),
+          imgClass: ['h-full', 'w-full', imageClass],
+          alt: imageAltText,
+          draggable: false,
+          dataAttributes: {
+            'data-testid': 'original',
+          },
+        }}
+      >
+        {@render overlays?.()}
+      </div>
+    {/if}
+
+    <!-- Use placeholder empty image to zoomImage so it can monitor mouse-wheel events and update zoom state -->
     <div
       class="absolute top-0"
-      style:transform-origin="0px 0px"
-      style:transform={zoomTransform}
+      use:zoomImageAction={{ disabled: zoomDisabled }}
       style:width={renderDimensions.width}
       style:height={renderDimensions.height}
-      use:imageLoader={{
-        src: originalUrl,
-        onStart: () => adaptiveImageLoader.onOriginalStart(),
-        onLoad: () => adaptiveImageLoader.onOriginalLoad(),
-        onError: () => adaptiveImageLoader.onOriginalError(),
-        onElementCreated: (element) => (originalElement = element),
-        imgClass: ['h-full', 'w-full', imageClass],
-        alt: imageAltText,
-        draggable: false,
-        dataAttributes: {
-          'data-testid': 'original',
-        },
-      }}
     >
-      {@render overlays?.()}
+      <img alt="" class="absolute h-full w-full hidden" draggable="false" />
     </div>
-  {/if}
-
-  <!-- Use placeholder empty image to zoomImage so it can monitor mouse-wheel events and update zoom state -->
-  <div
-    class="absolute top-0"
-    use:zoomImageAction={{ disabled: zoomDisabled }}
-    style:width={renderDimensions.width}
-    style:height={renderDimensions.height}
-  >
-    <img alt="" class="absolute h-full w-full hidden" draggable="false" />
   </div>
 </div>
 
