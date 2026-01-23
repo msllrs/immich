@@ -269,19 +269,24 @@ class SyncStreamService {
         final assetData = payload['asset'];
         final editData = payload['edit'];
 
-        if (assetData == null || editData == null) {
+        if (assetData == null) {
           continue;
         }
 
         final asset = SyncAssetV1.fromJson(assetData);
-        final edits = (editData as List<dynamic>)
-            .map((e) => SyncAssetEditV1.fromJson(e))
-            .whereType<SyncAssetEditV1>()
-            .toList();
 
         if (asset != null) {
           assets.add(asset);
-          assetEdits.addAll(edits);
+
+          // Edits are only send on v2.6.0+
+          if (editData != null) {
+            final edits = (editData as List<dynamic>)
+                .map((e) => SyncAssetEditV1.fromJson(e))
+                .whereType<SyncAssetEditV1>()
+                .toList();
+
+            assetEdits.addAll(edits);
+          }
         }
       }
 
