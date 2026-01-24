@@ -64,20 +64,21 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> with Ti
   (Rect, double) getInitialEditorState() {
     final existingCrop = widget.edits.firstWhereOrNull((edit) => edit.action == AssetEditAction.crop);
 
-    Rect crop = existingCrop != null
+    Rect crop = existingCrop != null && originalWidth != null && originalHeight != null
         ? convertCropParametersToRect(
             CropParameters.fromJson(existingCrop.parameters)!,
-            originalWidth ?? 0,
-            originalHeight ?? 0,
+            originalWidth!,
+            originalHeight!,
           )
         : const Rect.fromLTRB(0, 0, 1, 1);
 
-    final existingRotationParameters = RotateParameters.fromJson(
-      widget.edits.firstWhereOrNull((edit) => edit.action == AssetEditAction.rotate)?.parameters,
-    );
+    final rotationAngle =
+        RotateParameters.fromJson(
+          widget.edits.firstWhereOrNull((edit) => edit.action == AssetEditAction.rotate)?.parameters,
+        )?.angle ??
+        0;
 
-    // crop = convertCropRectToRotated(crop, existingRotationAngle);
-    return (crop, existingRotationParameters?.angle.toDouble() ?? 0);
+    return (crop, rotationAngle.toDouble());
   }
 
   Future<void> _saveEditedImage() async {
