@@ -22,10 +22,7 @@ class EditImageActionButton extends ConsumerWidget {
         return;
       }
 
-      final imageProvider = getThumbnailImageProvider(currentAsset, edited: false);
-      if (imageProvider == null) {
-        return;
-      }
+      final imageProvider = getFullImageProvider(currentAsset, edited: false);
 
       final image = Image(image: imageProvider);
       final edits = await ref.read(remoteAssetRepositoryProvider).getAssetEdits(currentAsset.remoteId!);

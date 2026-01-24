@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:auto_route/auto_route.dart';
 import 'package:collection/collection.dart';
 import 'package:crop_image/crop_image.dart';
@@ -12,7 +14,9 @@ import 'package:immich_mobile/domain/models/exif.model.dart';
 import 'package:immich_mobile/entities/asset.entity.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/providers/infrastructure/action.provider.dart';
+import 'package:immich_mobile/providers/theme.provider.dart';
 import 'package:immich_mobile/providers/websocket.provider.dart';
+import 'package:immich_mobile/theme/theme_data.dart';
 import 'package:immich_mobile/utils/editor.utils.dart';
 import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_ui/immich_ui.dart';
@@ -44,8 +48,12 @@ class DriftEditImagePage extends ConsumerStatefulWidget {
   ConsumerState<DriftEditImagePage> createState() => _DriftEditImagePageState();
 }
 
-class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
+class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> with TickerProviderStateMixin {
   late final CropController cropController;
+
+  int _rotationAngle = 0;
+  Duration _rotationAnimationDuration = const Duration(milliseconds: 250);
+
   double? aspectRatio;
 
   late final originalWidth = widget.exifInfo.isFlipped ? widget.exifInfo.height : widget.exifInfo.width;
@@ -53,7 +61,7 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
 
   bool isEditing = false;
 
-  (Rect, CropRotation) getInitialEditorState() {
+  (Rect, double) getInitialEditorState() {
     final existingCrop = widget.edits.firstWhereOrNull((edit) => edit.action == AssetEditAction.crop);
 
     Rect crop = existingCrop != null
@@ -68,11 +76,8 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
       widget.edits.firstWhereOrNull((edit) => edit.action == AssetEditAction.rotate)?.parameters,
     );
 
-    final existingRotationAngle =
-        CropRotationExtension.fromDegrees(existingRotationParameters?.angle.toInt() ?? 0) ?? CropRotation.up;
-
-    crop = convertCropRectToRotated(crop, existingRotationAngle);
-    return (crop, existingRotationAngle);
+    // crop = convertCropRectToRotated(crop, existingRotationAngle);
+    return (crop, existingRotationParameters?.angle.toDouble() ?? 0);
   }
 
   Future<void> _saveEditedImage() async {
@@ -80,9 +85,8 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
       isEditing = true;
     });
 
-    CropRotation rotation = cropController.rotation;
-    Rect cropRect = convertCropRectFromRotated(cropController.crop, rotation);
-    final cropParameters = convertRectToCropParameters(cropRect, originalWidth ?? 0, originalHeight ?? 0);
+    final cropParameters = convertRectToCropParameters(cropController.crop, originalWidth ?? 0, originalHeight ?? 0);
+    final normalizedRotation = (_rotationAngle % 360 + 360) % 360;
 
     final edits = <AssetEdit>[];
 
@@ -90,11 +94,11 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
       edits.add(AssetEdit(action: AssetEditAction.crop, parameters: cropParameters.toJson()));
     }
 
-    if (rotation != CropRotation.up) {
+    if (normalizedRotation != 0) {
       edits.add(
         AssetEdit(
           action: AssetEditAction.rotate,
-          parameters: RotateParameters(angle: rotation.degrees).toJson(),
+          parameters: RotateParameters(angle: normalizedRotation).toJson(),
         ),
       );
     }
@@ -129,7 +133,10 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
     super.initState();
 
     final (existingCrop, existingRotationAngle) = getInitialEditorState();
-    cropController = CropController(defaultCrop: existingCrop, rotation: existingRotationAngle);
+    cropController = CropController(defaultCrop: existingCrop);
+
+    _rotationAnimationDuration = const Duration(milliseconds: 0);
+    _rotationAngle = existingRotationAngle.toInt();
   }
 
   @override
@@ -145,148 +152,217 @@ class _DriftEditImagePageState extends ConsumerState<DriftEditImagePage> {
     );
   }
 
+  void _rotateLeft() {
+    setState(() {
+      _rotationAnimationDuration = const Duration(milliseconds: 150);
+      _rotationAngle -= 90;
+    });
+  }
+
+  void _rotateRight() {
+    setState(() {
+      _rotationAnimationDuration = const Duration(milliseconds: 150);
+      _rotationAngle += 90;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: context.scaffoldBackgroundColor,
-        title: Text("edit".tr()),
-        leading: const ImmichCloseButton(),
-        actions: [
-          isEditing
-              ? _buildProgressIndicator()
-              : ImmichIconButton(
-                  icon: Icons.done_rounded,
-                  color: ImmichColor.primary,
-                  variant: ImmichVariant.ghost,
-                  onPressed: _saveEditedImage,
-                ),
-        ],
-      ),
-      backgroundColor: context.scaffoldBackgroundColor,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            return Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.only(top: 20),
-                  width: constraints.maxWidth * 0.9,
-                  height: constraints.maxHeight * 0.6,
-                  child: CropImage(controller: cropController, image: widget.image, gridColor: Colors.white),
-                ),
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: context.scaffoldBackgroundColor,
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(20),
-                        topRight: Radius.circular(20),
-                      ),
-                    ),
+    return Theme(
+      data: getThemeData(colorScheme: ref.watch(immichThemeProvider).dark, locale: context.locale),
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          title: Text("edit".tr()),
+          leading: const ImmichCloseButton(),
+          actions: [
+            isEditing
+                ? _buildProgressIndicator()
+                : ImmichIconButton(
+                    icon: Icons.done_rounded,
+                    color: ImmichColor.primary,
+                    variant: ImmichVariant.ghost,
+                    onPressed: _saveEditedImage,
+                  ),
+          ],
+        ),
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          bottom: false,
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              // Calculate the bounding box size needed for the rotated container
+              final baseWidth = constraints.maxWidth * 0.9;
+              final baseHeight = constraints.maxHeight * 0.8;
+
+              return Column(
+                children: [
+                  SizedBox(
+                    width: constraints.maxWidth,
+                    height: constraints.maxHeight * 0.7,
                     child: Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(left: 20, right: 20, bottom: 10),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                ImmichIconButton(
-                                  icon: Icons.rotate_left,
-                                  variant: ImmichVariant.ghost,
-                                  color: ImmichColor.secondary,
-                                  onPressed: () => cropController.rotateLeft(),
-                                ),
-                                ImmichIconButton(
-                                  icon: Icons.rotate_right,
-                                  variant: ImmichVariant.ghost,
-                                  color: ImmichColor.secondary,
-                                  onPressed: () => cropController.rotateRight(),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: <Widget>[
-                              _AspectRatioButton(
-                                cropController: cropController,
-                                currentAspectRatio: aspectRatio,
-                                ratio: null,
-                                label: 'Free',
-                                onPressed: () {
-                                  setState(() {
-                                    cropController.crop = const Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
-                                    aspectRatio = null;
-                                    cropController.aspectRatio = null;
-                                  });
-                                },
-                              ),
-                              _AspectRatioButton(
-                                cropController: cropController,
-                                currentAspectRatio: aspectRatio,
-                                ratio: 1.0,
-                                label: '1:1',
-                                onPressed: () {
-                                  setState(() {
-                                    cropController.crop = const Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
-                                    aspectRatio = 1.0;
-                                    cropController.aspectRatio = 1.0;
-                                  });
-                                },
-                              ),
-                              _AspectRatioButton(
-                                cropController: cropController,
-                                currentAspectRatio: aspectRatio,
-                                ratio: 16.0 / 9.0,
-                                label: '16:9',
-                                onPressed: () {
-                                  setState(() {
-                                    cropController.crop = const Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
-                                    aspectRatio = 16.0 / 9.0;
-                                    cropController.aspectRatio = 16.0 / 9.0;
-                                  });
-                                },
-                              ),
-                              _AspectRatioButton(
-                                cropController: cropController,
-                                currentAspectRatio: aspectRatio,
-                                ratio: 3.0 / 2.0,
-                                label: '3:2',
-                                onPressed: () {
-                                  setState(() {
-                                    cropController.crop = const Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
-                                    aspectRatio = 3.0 / 2.0;
-                                    cropController.aspectRatio = 3.0 / 2.0;
-                                  });
-                                },
-                              ),
-                              _AspectRatioButton(
-                                cropController: cropController,
-                                currentAspectRatio: aspectRatio,
-                                ratio: 7.0 / 5.0,
-                                label: '7:5',
-                                onPressed: () {
-                                  setState(() {
-                                    cropController.crop = const Rect.fromLTRB(0.1, 0.1, 0.9, 0.9);
-                                    aspectRatio = 7.0 / 5.0;
-                                    cropController.aspectRatio = 7.0 / 5.0;
-                                  });
-                                },
-                              ),
-                            ],
-                          ),
-                        ],
+                      child: AnimatedRotation(
+                        turns: _rotationAngle / 360,
+                        duration: _rotationAnimationDuration,
+                        curve: Curves.easeInOut,
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          width: (_rotationAngle % 180 == 0) ? baseWidth : baseHeight,
+                          height: (_rotationAngle % 180 == 0) ? baseHeight : baseWidth,
+                          child: CropImage(controller: cropController, image: widget.image, gridColor: Colors.white),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            );
-          },
+                  Expanded(
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: context.scaffoldBackgroundColor,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(20),
+                          topRight: Radius.circular(20),
+                        ),
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(left: 20, right: 20, top: 20, bottom: 10),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  ImmichIconButton(
+                                    icon: Icons.rotate_left,
+                                    variant: ImmichVariant.ghost,
+                                    color: ImmichColor.secondary,
+                                    onPressed: _rotateLeft,
+                                  ),
+                                  ImmichIconButton(
+                                    icon: Icons.rotate_right,
+                                    variant: ImmichVariant.ghost,
+                                    color: ImmichColor.secondary,
+                                    onPressed: _rotateRight,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: Row(
+                                spacing: 12,
+                                children: <Widget>[
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: null,
+                                    label: 'Free',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = null;
+                                        cropController.aspectRatio = null;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 1.0,
+                                    label: '1:1',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 1.0;
+                                        cropController.aspectRatio = 1.0;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 16.0 / 9.0,
+                                    label: '16:9',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 16.0 / 9.0;
+                                        cropController.aspectRatio = 16.0 / 9.0;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 3.0 / 2.0,
+                                    label: '3:2',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 3.0 / 2.0;
+                                        cropController.aspectRatio = 3.0 / 2.0;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 7.0 / 5.0,
+                                    label: '7:5',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 7.0 / 5.0;
+                                        cropController.aspectRatio = 7.0 / 5.0;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 9.0 / 16.0,
+                                    label: '9:16',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 9.0 / 16.0;
+                                        cropController.aspectRatio = 9.0 / 16.0;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 2.0 / 3.0,
+                                    label: '2:3',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 2.0 / 3.0;
+                                        cropController.aspectRatio = 2.0 / 3.0;
+                                      });
+                                    },
+                                  ),
+                                  _AspectRatioButton(
+                                    cropController: cropController,
+                                    currentAspectRatio: aspectRatio,
+                                    ratio: 5.0 / 7.0,
+                                    label: '5:7',
+                                    onPressed: () {
+                                      setState(() {
+                                        aspectRatio = 5.0 / 7.0;
+                                        cropController.aspectRatio = 5.0 / 7.0;
+                                      });
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -311,17 +387,24 @@ class _AspectRatioButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisSize: MainAxisSize.max,
       children: [
         IconButton(
-          icon: Icon(switch (label) {
-            'Free' => Icons.crop_free_rounded,
-            '1:1' => Icons.crop_square_rounded,
-            '16:9' => Icons.crop_16_9_rounded,
-            '3:2' => Icons.crop_3_2_rounded,
-            '7:5' => Icons.crop_7_5_rounded,
-            _ => Icons.crop_free_rounded,
-          }, color: currentAspectRatio == ratio ? context.primaryColor : context.themeData.iconTheme.color),
+          iconSize: 36,
+          icon: Transform.rotate(
+            angle: (ratio ?? 1.0) < 1.0 ? pi / 2 : 0,
+            child: Icon(switch (label) {
+              'Free' => Icons.crop_free_rounded,
+              '1:1' => Icons.crop_square_rounded,
+              '16:9' => Icons.crop_16_9_rounded,
+              '3:2' => Icons.crop_3_2_rounded,
+              '7:5' => Icons.crop_7_5_rounded,
+              '9:16' => Icons.crop_16_9_rounded,
+              '2:3' => Icons.crop_3_2_rounded,
+              '5:7' => Icons.crop_7_5_rounded,
+              _ => Icons.crop_free_rounded,
+            }, color: currentAspectRatio == ratio ? context.primaryColor : context.themeData.iconTheme.color),
+          ),
           onPressed: onPressed,
         ),
         Text(label, style: context.textTheme.displayMedium),
