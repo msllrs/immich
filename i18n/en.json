@@ -994,6 +994,7 @@
   "editor_close_without_save_prompt": "The changes will not be saved",
   "editor_close_without_save_title": "Close editor?",
   "editor_confirm_reset_all_changes": "Are you sure you want to reset all changes?",
+  "editor_filters": "Filters",
   "editor_flip_horizontal": "Flip horizontal",
   "editor_flip_vertical": "Flip vertical",
   "editor_orientation": "Orientation",

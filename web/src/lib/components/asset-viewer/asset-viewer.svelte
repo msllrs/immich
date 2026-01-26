@@ -408,7 +408,7 @@
     ) {
       return 'ImagePanaramaViewer';
     }
-    if (assetViewerManager.isShowEditor && editManager.selectedTool?.type === EditToolType.Transform) {
+    if (assetViewerManager.isShowEditor) {
       return 'CropArea';
     }
     return 'PhotoViewer';
